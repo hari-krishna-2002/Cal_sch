@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Task Extractor</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 40px; 
+      background-color: #e2dede; 
+    }
+    h1 { 
+      color: #333;
+      justify-self: center; 
+    }
+    textarea, input[type="file"], input[type="text"] { 
+      width: 100%; 
+      margin-bottom: 10px; 
+      font-size: 16px; 
+    }
+    button { 
+      padding: 10px 20px; 
+      font-size: 16px; 
+      cursor: pointer; 
+    }
+    .task { 
+      background-color: #fff; 
+      padding: 10px; 
+      margin-top: 15px; 
+      border-radius: 5px; 
+      border-left: 5px solid #007bff; 
+    }
+    #calendarId{
+      width: 300px;
+      border: rgb(110, 93, 93);
+      border-radius: 10px;
+      height: 30px;
+    }
+    #div1, #div2{
+      display: flex;
+      flex-direction: row;
+      border: 2px solid whitesmoke;
+      padding: 20px 50px 20px 50px;
+      border-radius: 10px;
+      margin-bottom: 60px;
+
+    }
+    #div12{
+      margin-left: 100px;
+    }
+    #CalSetBtn{
+      margin-left: 100px;
+      border-radius: 10px;
+      border: 0px;
+      background-color: #8cb8e7;
+      height: 40px;
+      width: 180px;
+    }
+    #SchBtn{
+      margin-left: 240px;
+      border-radius: 10px;
+      border: 0px;
+      background-color: #8cb8e7;
+      height: 40px;
+      width: 180px;
+    }
+    #div2{
+      display: flex;
+      flex-direction: row;
+    }
+    #div22{
+      margin-left: 100px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Calendar Scheduler</h1>
+
+  <h3>🛠 Google Calendar Setup</h3>
+  <div id="div1">
+          <div id="div11">
+              <label for="calendarId">Calendar ID:</label><br />
+              <input type="text" id="calendarId" placeholder="your@gmail.com"><br />
+          </div>
+          <div id="div12">
+              <label for="serviceAccountFile">Upload Service Account Credientials (.json) File:</label><br />
+              <input type="file" id="serviceAccountFile" accept=".json"><br />
+          </div>
+
+          <button onclick="initCalendar()" id="CalSetBtn">🆗Load Calendar</button>
+  </div>
+  
+  <h3>📝 Schedule Tasks</h3>
+  <div id="div2">
+        <div id="div21">
+            <label for="fileInput">Upload a List of Tasks File (.txt):</label><br />
+            <input type="file" id="fileInput" accept=".txt"><br />
+        </div>
+        <div id="div22">
+            <label for="textInput">Or paste List of Tasks here:</label><br />
+            <textarea id="textInput" placeholder="Paste meeting transcription here..."></textarea><br />
+        </div>
+        <button onclick="submitText()" id="SchBtn">Schedule Calendar</button>
+  </div>
+  <div id="result"></div>
+
+  <script>
+    async function initCalendar() {
+      const calendarId = document.getElementById("calendarId").value;
+      const fileInput = document.getElementById("serviceAccountFile");
+
+      if (!calendarId || fileInput.files.length === 0) {
+        alert("Please provide Calendar ID and service_account.json file.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("calendar_id", calendarId);
+      formData.append("file", fileInput.files[0]);
+
+      const response = await fetch("http://localhost:8000/init_calendar", {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
+      if (result.status === "Calendar Initialized") {
+        alert("✅ Calendar configured successfully.");
+      } else {
+        alert("❌ Failed: " + result.error);
+      }
+    }
+
+    async function submitText() {
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = '⏳ Processing...';
+
+      let text = document.getElementById("textInput").value.trim();
+      const fileInput = document.getElementById("fileInput");
+      
+      if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        text = await file.text();
+      }
+
+      if (!text) {
+        resultDiv.innerHTML = '<span style="color: red;">Please enter or upload text.</span>';
+        return;
+      }
+
+      try {
+        const response = await fetch("http://localhost:8000/extract_tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text })
+        });
+
+        const tasks = await response.json();
+        if (tasks.error) {
+          resultDiv.innerHTML = `<span style="color: red;">Error: ${tasks.error}</span>`;
+          return;
+        }
+
+        resultDiv.innerHTML = `<h2>✅ ${tasks.length} Task(s) Extracted:</h2>`;
+        for (let task of tasks) {
+          const taskHtml = `
+            <div class="task">
+              <strong>Task:</strong> ${task.task}<br>
+              <strong>Due:</strong> ${task.due_date}<br>
+              <strong>Priority:</strong> ${task.priority}<br>
+              <strong>Category:</strong> ${task.category}<br>
+              <em>Original:</em> ${task.original}<br>
+            </div>
+          `;
+          resultDiv.innerHTML += taskHtml;
+
+          const createRes = await fetch("http://localhost:8000/create_event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              task_text: task.task,
+              due_date: task.due_date,
+              description: `Original: ${task.original} | Priority: ${task.priority} | Category: ${task.category}`
+            })
+          });
+
+          const calendarRes = await createRes.json();
+          if (calendarRes.status === "success") {
+            resultDiv.innerHTML += `<p>📅 <a href="${calendarRes.link}" target="_blank">View Event</a></p>`;
+          }
+        }
+      } catch (err) {
+        resultDiv.innerHTML = `<span style="color: red;">Request Failed: ${err.message}</span>`;
+      }
+    }
+  </script>
+</body>
+</html>
